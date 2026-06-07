@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Scraper output and browser state
+downloaded_site/
+persistent_profiles/
+browser-profile*/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment and local settings
+.env
+.env.*
+!.env.example
+
+# Editor and local tooling
+.cursor/
+.sixth/
+.codegraph/
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
