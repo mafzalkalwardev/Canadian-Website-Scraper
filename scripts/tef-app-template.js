@@ -2,6 +2,8 @@ let course;
 let currentSection;
 let currentMock;
 let mode = 'review';
+let activeSectionId = 'all';
+let searchQuery = '';
 
 const nav = document.getElementById('sectionNav');
 const content = document.getElementById('content');
@@ -9,6 +11,7 @@ const title = document.getElementById('pageTitle');
 const meta = document.getElementById('courseMeta');
 const quizBtn = document.getElementById('quizModeBtn');
 const reviewBtn = document.getElementById('reviewModeBtn');
+const sidebar = document.querySelector('.sidebar');
 
 fetch('data/course.json')
   .then((response) => response.json())
@@ -40,7 +43,30 @@ function setModeButtons() {
 }
 
 function renderNav() {
-  nav.innerHTML = course.sections.map((section) => {
+  const sectionsWithMocks = course.sections.filter((section) => section.mocks.length);
+  const sectionTabs = [
+    `<button class="section-filter ${activeSectionId === 'all' ? 'active' : ''}" data-section-filter="all" type="button">All</button>`,
+    ...sectionsWithMocks.map((section) => (
+      `<button class="section-filter ${activeSectionId === section.id ? 'active' : ''}" data-section-filter="${section.id}" type="button">${esc(section.title)}</button>`
+    )),
+  ].join('');
+
+  const visibleSections = course.sections
+    .filter((section) => activeSectionId === 'all' || section.id === activeSectionId)
+    .map((section) => ({
+      ...section,
+      mocks: section.mocks.filter((mock) => {
+        const haystack = `${section.title} ${mock.title} ${mock.id}`.toLowerCase();
+        return !searchQuery || haystack.includes(searchQuery);
+      }),
+    }));
+
+  nav.innerHTML = `
+    <div class="nav-tools">
+      <label class="nav-search"><span>Find mock</span><input id="mockSearch" type="search" value="${esc(searchQuery)}" placeholder="Mock 1, orale, reading"></label>
+      <div class="section-filters">${sectionTabs}</div>
+    </div>
+    ${visibleSections.map((section) => {
     const mocks = section.mocks.length
       ? section.mocks.map((mock) => {
         const questionCount = mock.attempts.reduce((count, attempt) => count + attempt.questions.length, 0);
@@ -50,7 +76,7 @@ function renderNav() {
       }).join('')
       : '<div class="empty" style="margin:8px">No scraped mocks yet</div>';
     return `<section class="section-card"><h3>${esc(section.title)}</h3>${mocks}</section>`;
-  }).join('');
+  }).join('')}`;
 
   nav.querySelectorAll('.mock-btn').forEach((button) => {
     button.onclick = () => {
@@ -61,6 +87,20 @@ function renderNav() {
       renderMock(currentMock);
     };
   });
+
+  nav.querySelectorAll('.section-filter').forEach((button) => {
+    button.onclick = () => {
+      activeSectionId = button.dataset.sectionFilter;
+      renderNav();
+    };
+  });
+
+  const search = document.getElementById('mockSearch');
+  search.oninput = () => {
+    searchQuery = search.value.trim().toLowerCase();
+    renderNav();
+    document.getElementById('mockSearch').focus();
+  };
 }
 
 function renderDashboard() {
@@ -93,6 +133,7 @@ function renderDashboard() {
 function renderMock(mock) {
   setModeButtons();
   title.textContent = mock.title;
+  if (sidebar) sidebar.classList.add('has-selection');
   const attempts = mock.attempts.filter((attempt) => (mode === 'review' ? attempt.mode === 'review' : true));
   const activeAttempts = attempts.length ? attempts : mock.attempts;
   const questionCount = activeAttempts.reduce((count, attempt) => count + attempt.questions.length, 0);
@@ -146,9 +187,18 @@ function optionHtml(option, question, key, saved) {
 }
 
 function media(question) {
+  const html = question.questionHtml || '';
+  const audio = question.audio && !html.includes(question.audio)
+    ? `<audio controls src="${esc(question.audio)}"></audio>`
+    : '';
+  const images = question.images
+    .filter((src) => !html.includes(src))
+    .map((src) => `<img src="${esc(src)}" loading="lazy">`)
+    .join('');
+  if (!audio && !images) return '';
   return `<div class="question-media">
-    ${question.audio ? `<audio controls src="${esc(question.audio)}"></audio>` : ''}
-    ${question.images.map((src) => `<img src="${esc(src)}" loading="lazy">`).join('')}
+    ${audio}
+    ${images}
   </div>`;
 }
 

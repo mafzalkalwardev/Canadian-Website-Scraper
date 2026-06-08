@@ -4,6 +4,7 @@ node_modules/
 # Scraper output and browser state
 downloaded_site/
 output/
+scrape_state.json
 persistent_profiles/
 browser-profile*/
 playwright-report/
