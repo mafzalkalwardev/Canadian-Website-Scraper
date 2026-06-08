@@ -26,8 +26,8 @@ async function main() {
   await fs.ensureDir(path.join(outputDir, 'css'));
   await fs.ensureDir(path.join(outputDir, 'js'));
 
-  await copyAssets();
   const course = buildCourse();
+  await copyAssets(course);
   await writeData(course);
   await writeFrontend();
 
@@ -40,10 +40,18 @@ async function main() {
   console.log(`Built structured TEF website: ${course.sections.length} sections, ${questionCount} questions.`);
 }
 
-async function copyAssets() {
+async function copyAssets(course) {
   const assetsDir = path.join(sourceDir, 'assets');
-  if (await fs.pathExists(assetsDir)) {
-    await fs.copy(assetsDir, path.join(outputDir, 'assets', 'source'));
+  if (!(await fs.pathExists(assetsDir))) return;
+
+  const targetDir = path.join(outputDir, 'assets', 'source');
+  const refs = referencedAssets(course);
+
+  for (const ref of refs) {
+    const relative = decodeAssetPath(ref);
+    const sourceFile = path.join(assetsDir, relative);
+    if (!(await fs.pathExists(sourceFile))) continue;
+    await fs.copy(sourceFile, path.join(targetDir, relative));
   }
 }
 
@@ -238,6 +246,47 @@ function localAsset(value) {
     return encodeURI(normalized);
   }
   return value;
+}
+
+function referencedAssets(course) {
+  const refs = new Set();
+  const add = (value) => {
+    if (!value || !String(value).startsWith('assets/source/')) return;
+    refs.add(String(value));
+  };
+  const addFromHtml = (html) => {
+    if (!html) return;
+    const $ = cheerio.load(html, { decodeEntities: false });
+    $('[src], [href]').each((i, el) => {
+      add($(el).attr('src'));
+      add($(el).attr('href'));
+    });
+  };
+
+  for (const section of course.sections) {
+    for (const mock of section.mocks) {
+      for (const attempt of mock.attempts) {
+        for (const question of attempt.questions) {
+          add(question.audio);
+          for (const source of question.audioSources || []) add(source);
+          for (const image of question.images || []) add(image);
+          addFromHtml(question.questionHtml);
+          for (const option of question.options || []) addFromHtml(option.html);
+        }
+      }
+    }
+  }
+
+  return refs;
+}
+
+function decodeAssetPath(value) {
+  const relativeUrl = String(value).replace(/^assets\/source\//, '');
+  try {
+    return decodeURI(relativeUrl).split('/').join(path.sep);
+  } catch (err) {
+    return relativeUrl.split('/').join(path.sep);
+  }
 }
 
 function extractScore(html) {

@@ -136,8 +136,7 @@ function renderMock(mock) {
   setModeButtons();
   title.textContent = mock.title;
   if (sidebar) sidebar.classList.add('has-selection');
-  const attempts = mock.attempts.filter((attempt) => (mode === 'review' ? attempt.mode === 'review' : true));
-  const activeAttempts = attempts.length ? attempts : mock.attempts;
+  const activeAttempts = attemptsForMode(mock);
   const questionCount = activeAttempts.reduce((count, attempt) => count + attempt.questions.length, 0);
   content.innerHTML = `
     <div class="panel mock-header">
@@ -155,18 +154,20 @@ function renderMock(mock) {
 }
 
 function renderAttempt(attempt) {
+  const reviewMode = mode === 'review';
   return `<section class="panel">
-    <h2>${attempt.mode === 'review' ? 'Review / answers' : 'Quiz page'}</h2>
-    <p>Status: ${esc(attempt.status || 'Saved')}${attempt.score ? ` - Score: ${esc(attempt.score)}` : ''}${attempt.grade ? ` - Grade: ${esc(attempt.grade)}` : ''}</p>
+    <h2>${reviewMode ? 'Review / answers' : 'Quiz page'}</h2>
+    <p>${reviewMode ? `Status: ${esc(attempt.status || 'Saved')}${attempt.score ? ` - Score: ${esc(attempt.score)}` : ''}${attempt.grade ? ` - Grade: ${esc(attempt.grade)}` : ''}` : 'Practice locally. Your choices are saved in this browser.'}</p>
   </section>${attempt.questions.map((question) => renderQuestion(question, attempt)).join('')}`;
 }
 
 function renderQuestion(question, attempt) {
-  const key = `esl:${attempt.sourceHtml}:q${question.number}`;
-  const saved = localStorage.getItem(key) || question.userAnswer || '';
-  const status = question.correctAnswer && saved
+  const key = answerKey(question);
+  const saved = savedAnswer(question);
+  const reviewMode = mode === 'review';
+  const status = reviewMode && question.correctAnswer && saved
     ? (saved === question.correctAnswer ? 'correct' : 'wrong')
-    : question.isCorrect ? 'correct' : '';
+    : reviewMode && question.isCorrect ? 'correct' : '';
 
   return `<article class="question-card ${status}">
     <div class="question-head">
@@ -182,7 +183,7 @@ function renderQuestion(question, attempt) {
 
 function optionHtml(option, question, key, saved) {
   const selected = saved === option.label;
-  const correct = question.correctAnswer === option.label;
+  const correct = mode === 'review' && question.correctAnswer === option.label;
   return `<label class="option ${selected ? 'selected ' : ''}${correct ? 'correct' : ''}">
     <input type="radio" name="${key}" value="${option.label}" ${selected ? 'checked' : ''} data-key="${key}">
     <strong>${esc(option.label)}.</strong>
@@ -207,13 +208,34 @@ function media(question) {
 }
 
 function reviewBlock(question, saved) {
-  if (mode !== 'review' && !question.correctAnswer) return '';
+  if (mode !== 'review') return '';
   return `<div class="explain">
     ${saved ? `<p><strong>Your answer:</strong> ${esc(saved)}</p>` : ''}
     ${question.correctAnswer ? `<p><strong>Correct answer:</strong> ${esc(question.correctAnswer)}</p>` : ''}
     ${question.explanation ? `<p><strong>Explanation:</strong> ${esc(question.explanation)}</p>` : ''}
     ${question.transcription ? `<p><strong>Transcription:</strong> ${esc(question.transcription)}</p>` : ''}
   </div>`;
+}
+
+function attemptsForMode(mock) {
+  const withQuestions = mock.attempts.filter((attempt) => attempt.questions.length);
+  if (mode === 'review') {
+    const reviews = withQuestions.filter((attempt) => attempt.mode === 'review');
+    return reviews.length ? reviews : withQuestions;
+  }
+
+  const practice = withQuestions.filter((attempt) => attempt.mode !== 'review');
+  return practice.length ? practice : withQuestions;
+}
+
+function answerKey(question) {
+  return `esl:${currentMock ? currentMock.id : 'mock'}:q${question.number}`;
+}
+
+function savedAnswer(question) {
+  const stored = localStorage.getItem(answerKey(question));
+  if (stored) return stored;
+  return mode === 'review' ? question.userAnswer || '' : '';
 }
 
 function wireOptions() {
