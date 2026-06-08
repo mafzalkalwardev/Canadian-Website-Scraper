@@ -106,6 +106,8 @@ function renderNav() {
 function renderDashboard() {
   title.textContent = 'Dashboard';
   currentMock = null;
+  content.scrollTop = 0;
+  window.scrollTo(0, 0);
   document.querySelectorAll('.mock-btn').forEach((item) => item.classList.remove('active'));
   const mocks = course.sections.reduce((count, section) => count + section.mocks.length, 0);
   const attempts = course.sections.reduce((count, section) => (
@@ -146,6 +148,8 @@ function renderMock(mock) {
       <button class="primary" id="dashboardBtn" type="button">Dashboard</button>
     </div>
     ${activeAttempts.map(renderAttempt).join('')}`;
+  content.scrollTop = 0;
+  window.scrollTo(0, 0);
   document.getElementById('dashboardBtn').onclick = renderDashboard;
   wireOptions();
 }
@@ -216,7 +220,10 @@ function wireOptions() {
   document.querySelectorAll('input[type=radio][data-key]').forEach((input) => {
     input.onchange = () => {
       localStorage.setItem(input.dataset.key, input.value);
+      const scroller = document.querySelector('.content');
+      const prevScrollTop = scroller ? scroller.scrollTop : null;
       if (currentMock) renderMock(currentMock);
+      if (scroller && prevScrollTop !== null) scroller.scrollTop = prevScrollTop;
     };
   });
 }
