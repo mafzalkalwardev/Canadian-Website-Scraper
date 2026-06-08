@@ -1,94 +1,101 @@
-# Canadian Website Scraper
+# Enterpreneural Success Language TEF Scraper
 
-A local website capture tool for saving live web pages as offline HTML packages. It can run from a browser-based control panel, a small desktop GUI, or directly from the command line.
+Local TEFSuccess/Moodle scraper and review-site builder. The scraper captures logged-in course pages with Playwright, then converts the saved Moodle HTML into a clean offline quiz/review website backed by structured JSON.
 
-## Features
-
-- Capture the currently visible page after manual navigation or login.
-- Crawl same-origin pages up to a configurable page limit.
-- Download page assets and rewrite references for offline viewing.
-- Save HTML, plain text, screenshots, and a manifest for each export.
-- Reuse an existing Chrome profile when a site requires an authenticated session.
-- Optional deep quiz scraper for Moodle-style quiz review pages.
-
-## Requirements
-
-- Node.js 18 or newer
-- npm
-- Python 3.10 or newer, only needed for the optional desktop GUI
-- Google Chrome, recommended when using persistent Chrome profiles
-
-## Install
+## Setup
 
 ```bash
 npm install
 ```
 
-The install step also downloads the Playwright browser runtime.
+Python 3.10+ is also required for the command wrappers.
 
-## Run The Web App
+## Credentials
 
-```bash
-npm start
+Do not hardcode credentials. Provide them only through environment variables:
+
+```powershell
+$env:TEF_USERNAME="your-email@example.com"
+$env:TEF_PASSWORD="your-password"
 ```
 
-Open `http://localhost:3000`, enter a website URL, and click `Start`. Use the opened browser normally, then choose `Scrape Current Page`, `Next Page`, or `Finish` from the web controls.
-
-## Run The Desktop App
+## Run A Full Scrape
 
 ```bash
-npm run app
+python scrape.py --config config.json
 ```
 
-The desktop app starts the same scraper engine and provides local controls for scraping the visible browser page.
+This runs `QuizDeepScraper.js`, updates `scrape_state.json` with the newest export folder, and builds the structured site into `output/`.
 
-## Command Line Usage
+## Resume / Rebuild
 
-Scrape interactively:
+Rebuild from the last successful scrape:
 
 ```bash
-node Scraper.js https://example.com
+python scrape.py --resume
 ```
 
-Crawl same-origin pages:
+Build from the configured `sourceExportDir` without scraping:
 
 ```bash
-node Scraper.js https://example.com --crawl --max-pages 75 --headless
+python scrape.py --build-only
 ```
 
-Use a persistent Chrome profile:
+Or build directly:
 
 ```bash
-node Scraper.js https://example.com --profile ./persistent_profiles/default --browser-channel chrome --profile-name Default
+python build_site.py --source downloaded_site/quiz-deep-2026-06-07T13-05-25-044Z --output output
 ```
 
-Deep quiz capture:
+## Open The Local Website
 
 ```bash
-node QuizDeepScraper.js https://example.com/course/view.php?id=2 --profile ./persistent_profiles/default --browser-channel chrome
+python -m http.server 8000 -d output
 ```
 
-For quiz sites that support username and password login, credentials can be provided with `--username` and `--password`, or with the `TEF_USERNAME` and `TEF_PASSWORD` environment variables. Do not commit real credentials.
+Then open:
 
-## Output
+```text
+http://127.0.0.1:8000/
+```
 
-Exports are written under `downloaded_site/`. Each run creates a timestamped folder containing captured pages, screenshots, downloaded assets, and `manifest.json`.
+## Output Structure
 
-The output folder is intentionally ignored by git so the repository only contains source code and runnable project files.
+```text
+output/
+  index.html
+  assets/
+    source/
+  data/
+    course.json
+    sections/
+      comprehension_ecrite.json
+      comprehension_orale.json
+      production_ecrite.json
+      production_orale.json
+  css/
+    style.css
+  js/
+    app.js
+```
 
-## GitHub Upload Set
+## What The Builder Extracts
 
-This repository is intended to track only:
+- Course sections and mocks
+- Question order
+- Question text and cleaned HTML
+- MCQ options
+- User/correct-answer fields when visible in the saved review HTML
+- Scores/grades when visible
+- Local image and audio references
+- Explanations/transcriptions when present in Moodle feedback blocks
 
-- `Scraper.js`
-- `QuizDeepScraper.js`
-- `server.js`
-- `app.py`
-- `public/`
-- `run-server.ps1`
-- `package.json`
-- `package-lock.json`
-- `.gitignore`
-- `README.md`
+The generated frontend removes Moodle boilerplate and provides dashboard, quiz mode, review mode, clickable MCQs, localStorage answer saving, and responsive styling.
 
-Generated folders such as `node_modules/`, `downloaded_site/`, `persistent_profiles/`, caches, logs, and editor metadata are ignored.
+## Checks
+
+```bash
+npm run check
+node --check scripts/build-tef-site.js
+node --check scripts/tef-app-template.js
+```

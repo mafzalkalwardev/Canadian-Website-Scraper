@@ -3,6 +3,7 @@ node_modules/
 
 # Scraper output and browser state
 downloaded_site/
+output/
 persistent_profiles/
 browser-profile*/
 playwright-report/
