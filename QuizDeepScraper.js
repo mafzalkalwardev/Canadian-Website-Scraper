@@ -105,14 +105,15 @@ async function login(targetPage) {
   await targetPage.locator('input[name="username"], #username').first().fill(options.username);
   await targetPage.locator('input[name="password"], #password').first().fill(options.password);
   await Promise.all([
-    targetPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {}),
+    targetPage.waitForURL((url) => !/\/login\/index\.php/i.test(url.pathname), { timeout: 30000 }).catch(() => {}),
     targetPage.locator('button[type="submit"], input[type="submit"], #loginbtn').first().click(),
   ]);
+  await targetPage.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await targetPage.waitForFunction(() => {
     const text = document.body ? document.body.innerText : '';
-    return /Log out|You are logged in as|My courses/i.test(text) || /Invalid login|Log in to the site/i.test(text);
-  }, { timeout: 15000 }).catch(() => {});
-  await targetPage.waitForTimeout(1000);
+    if (/Invalid login/i.test(text)) return true;
+    return /Log out|You are logged in as|My courses/i.test(text) && !/Log in to the site/i.test(text);
+  }, { timeout: 30000 }).catch(() => {});
   const text = await bodyText(targetPage);
   if (!/Log out|You are logged in as|My courses/i.test(text) || /Invalid login|Log in to the site/i.test(text)) {
     throw new Error('Login did not reach an authenticated page.');

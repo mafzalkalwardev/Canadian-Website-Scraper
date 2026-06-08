@@ -7,7 +7,9 @@
     "app": "python app.py",
     "start": "node server.js",
     "postinstall": "npx playwright install",
-    "check": "node --check Scraper.js && node --check QuizDeepScraper.js && node --check server.js",
+    "build:tef-site": "python build_site.py --source downloaded_site/quiz-deep-2026-06-07T13-05-25-044Z --output output",
+    "scrape:tef": "python scrape.py --config config.json",
+    "check": "node --check Scraper.js && node --check QuizDeepScraper.js && node --check server.js && node --check scripts/build-tef-site.js && node --check scripts/tef-app-template.js",
     "test": "npm run check"
   },
   "keywords": [
