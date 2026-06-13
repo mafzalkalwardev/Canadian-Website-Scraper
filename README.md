@@ -1,4 +1,40 @@
-# M.Awais Success Web — TEF Practice Site
+<div align="center">
+
+# 🚀 Canadian Website Scraper
+
+**A python Playwright Scrapper used to scrap Canadian Study website including encrypted Voices, Text, MCQS, Pictures and make a replica website**
+
+Documented · MIT licensed · Maintained
+
+[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+[![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+
+[Features](#-features) · [Quick Start](#-quick-start) · [Screenshots](#-screenshots) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+## 🖼 Screenshots
+
+![Canadian Website Scraper screenshot](docs/screenshots/placeholder.svg)
+
+*Replace `docs/screenshots/placeholder.svg` with real app screenshots.*
+
+---
+
+## 🐍 Contribution graph
+
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/Canadian-Website-Scraper/output/snake-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mafzalkalwardev/Canadian-Website-Scraper/output/snake.svg" />
+  <img alt="Contribution snake" src="https://raw.githubusercontent.com/mafzalkalwardev/Canadian-Website-Scraper/output/snake.svg" />
+</picture>
+
+
+---
 
 Local TEFSuccess scraper and quiz website for **Muhammad Awais Success Web**. The scraper logs into [tefsuccess.ca](https://tefsuccess.ca), captures quiz review pages with Playwright, and builds a static practice site deployed to Vercel.
 
