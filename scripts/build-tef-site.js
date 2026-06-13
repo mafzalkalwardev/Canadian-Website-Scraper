@@ -1,6 +1,10 @@
 const fs = require('fs-extra');
 const path = require('path');
 const cheerio = require('cheerio');
+const {
+  findBestReviewExport,
+} = require('./review-utils');
+const { isJunkMediaUrl } = require('./media-utils');
 
 const APP_TEMPLATE = path.join(__dirname, 'tef-app-template.js');
 const sourceDir = path.resolve(process.argv[2] || '');
@@ -20,6 +24,7 @@ main().catch((err) => {
 });
 
 async function main() {
+  const frontendBackup = await backupFrontend(outputDir);
   await fs.remove(outputDir);
   await fs.ensureDir(path.join(outputDir, 'assets'));
   await fs.ensureDir(path.join(outputDir, 'data', 'sections'));
@@ -30,6 +35,7 @@ async function main() {
   await copyAssets(course);
   await writeData(course);
   await writeFrontend();
+  await restoreFrontend(outputDir, frontendBackup);
 
   const questionCount = course.sections.reduce((total, section) => (
     total + section.mocks.reduce((mockTotal, mock) => (
@@ -97,6 +103,8 @@ function buildCourse() {
     }
   }
 
+  enrichMocksFromExports(mocks, sourceDir);
+
   const sectionMap = new Map();
   for (const mock of mocks.values()) {
     const hasAudio = mock.attempts.some((attempt) => attempt.questions.some((question) => question.audio));
@@ -118,8 +126,8 @@ function buildCourse() {
   }));
 
   for (const placeholder of [
-    ['production_ecrite', 'Production écrite'],
-    ['production_orale', 'Production orale'],
+    ['production_ecrite', 'Expression écrite'],
+    ['production_orale', 'Expression orale'],
   ]) {
     if (!sectionMap.has(placeholder[0])) {
       sections.push({ id: placeholder[0], title: placeholder[1], mocks: [] });
@@ -132,6 +140,77 @@ function buildCourse() {
     capturedAt: manifest.capturedAt,
     sections,
   };
+}
+
+function enrichMocksFromExports(mocks, exportDir) {
+  const supplementalRoot = path.join(exportDir, '..');
+
+  for (const mock of mocks.values()) {
+    const quizNo = naturalMockNumber(mock.id);
+    if (!quizNo) continue;
+
+    const currentCount = Math.max(
+      0,
+      ...mock.attempts
+        .filter((attempt) => attempt.mode === 'review')
+        .map((attempt) => attempt.questions.filter((question) => question.correctAnswer).length),
+    );
+    const best = findBestReviewExport(supplementalRoot, quizNo, exportDir);
+    if (best.count > currentCount) {
+      const meta = {
+        mockId: mock.id,
+        mockTitle: mock.title,
+        pageType: 'review',
+        sectionHint: quizNo >= 22 ? 'comprehension_orale' : 'comprehension_ecrite',
+      };
+      const mergedQuestions = [];
+      for (const filePath of best.files) {
+        const html = fs.readFileSync(filePath, 'utf8');
+        const fakePage = {
+          htmlFile: path.basename(filePath),
+          title: mock.title,
+          screenshotFile: '',
+        };
+        for (const question of extractQuestions(html, fakePage, meta)) {
+          const existing = mergedQuestions.find((item) => item.number === question.number);
+          if (!existing) mergedQuestions.push(question);
+          else if (!existing.correctAnswer && question.correctAnswer) Object.assign(existing, question);
+        }
+      }
+
+      mock.attempts = mock.attempts.filter((attempt) => attempt.mode !== 'review');
+      mock.attempts.unshift({
+        attemptNo: 1,
+        status: 'Finished',
+        score: extractScore(fs.readFileSync(best.files[0], 'utf8')),
+        grade: extractGrade(fs.readFileSync(best.files[0], 'utf8')),
+        sourceHtml: path.basename(best.files[0]),
+        sourceScreenshot: '',
+        mode: 'review',
+        questions: mergedQuestions,
+      });
+    }
+
+    mergeAnswerKeys(mock);
+    mock.attempts.forEach((attempt, index) => {
+      attempt.attemptNo = index + 1;
+    });
+  }
+}
+
+function mergeAnswerKeys(mock) {
+  const byNumber = new Map();
+  for (const attempt of mock.attempts) {
+    for (const question of attempt.questions) {
+      if (question.correctAnswer) byNumber.set(question.number, question.correctAnswer);
+    }
+  }
+  for (const attempt of mock.attempts) {
+    for (const question of attempt.questions) {
+      const merged = byNumber.get(question.number);
+      if (merged) question.correctAnswer = merged;
+    }
+  }
 }
 
 function extractQuestions(html, page, meta) {
@@ -231,8 +310,7 @@ function collectMedia($, node, selector, attr) {
   const values = [];
   node.find(selector).each((i, el) => {
     const value = $(el).attr(attr);
-    if (!value) return;
-    if (/unflagged\.svg|flagged\.svg/i.test(value)) return;
+    if (!value || isJunkMediaUrl(value)) return;
     values.push(localAsset(value));
   });
   return Array.from(new Set(values));
@@ -354,10 +432,42 @@ async function writeData(course) {
   }
 }
 
+async function backupFrontend(targetDir) {
+  const files = ['index.html', 'css/style.css', 'js/app.js', 'logo.png', 'favicon.svg'];
+  const backup = new Map();
+  for (const rel of files) {
+    const filePath = path.join(targetDir, rel);
+    if (await fs.pathExists(filePath)) backup.set(rel, await fs.readFile(filePath));
+  }
+  return backup;
+}
+
+async function restoreFrontend(targetDir, backup) {
+  for (const [rel, content] of backup.entries()) {
+    if (rel === 'css/style.css' || rel === 'js/app.js') continue;
+    await fs.ensureDir(path.dirname(path.join(targetDir, rel)));
+    await fs.writeFile(path.join(targetDir, rel), content);
+  }
+}
+
 async function writeFrontend() {
-  await fs.writeFile(path.join(outputDir, 'index.html'), frontendHtml(), 'utf8');
+  const publicDir = path.join(__dirname, '..', 'public');
+  const indexTemplate = path.join(__dirname, 'tef-index-template.html');
+  const indexSrc = (await fs.pathExists(path.join(publicDir, 'index.html')))
+    ? path.join(publicDir, 'index.html')
+    : indexTemplate;
+  await fs.copy(indexSrc, path.join(outputDir, 'index.html'));
   await fs.writeFile(path.join(outputDir, 'css', 'style.css'), frontendCss(), 'utf8');
   await fs.writeFile(path.join(outputDir, 'js', 'app.js'), frontendJs(), 'utf8');
+
+  for (const asset of [
+    ['favicon.svg', path.join(__dirname, 'tef-favicon.svg')],
+    ['logo.png', path.join(publicDir, 'logo.png')],
+  ]) {
+    const [name, fallback] = asset;
+    const src = (await fs.pathExists(path.join(publicDir, name))) ? path.join(publicDir, name) : fallback;
+    if (await fs.pathExists(src)) await fs.copy(src, path.join(outputDir, name));
+  }
 }
 
 function frontendHtml() {
@@ -366,21 +476,48 @@ function frontendHtml() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Enterpreneural Success Language</title>
+  <meta name="description" content="Awais Ahmed Success Web — TEF practice and review quizzes">
+  <title>Awais Ahmed Success Web</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="app" class="app-shell">
-    <aside class="sidebar">
-      <div class="brand"><span>ES</span><div><h1>Enterpreneural Success Language</h1><p id="courseMeta">Loading course...</p></div></div>
+    <div id="sidebarOverlay" class="sidebar-overlay" hidden></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span>AAS</span>
+        <div>
+          <h1>Awais Ahmed Success Web</h1>
+          <p id="courseMeta">Loading course...</p>
+        </div>
+      </div>
       <nav id="sectionNav" class="section-nav"></nav>
     </aside>
     <main class="main">
       <header class="topbar">
-        <div><p class="eyebrow">Local TEF mock review</p><h2 id="pageTitle">Dashboard</h2></div>
-        <div class="top-actions"><button id="quizModeBtn">Quiz Mode</button><button id="reviewModeBtn">Review Mode</button></div>
+        <div class="topbar-left">
+          <button id="menuToggle" class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false">&#9776;</button>
+          <div>
+            <p class="eyebrow">TEF practice &amp; review</p>
+            <h2 id="pageTitle">Dashboard</h2>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button id="quizModeBtn" type="button">Quiz Mode</button>
+          <button id="reviewModeBtn" type="button">Review Mode</button>
+        </div>
       </header>
-      <section id="content" class="content"></section>
+      <div id="quizProgress" class="quiz-progress" hidden></div>
+      <section id="content" class="content">
+        <div class="loading-state">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <p>Loading quizzes...</p>
+        </div>
+      </section>
     </main>
   </div>
   <script src="js/app.js"></script>

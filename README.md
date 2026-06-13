@@ -1,6 +1,6 @@
-# Enterpreneural Success Language TEF Scraper
+# M.Awais Success Web — TEF Practice Site
 
-Local TEFSuccess/Moodle scraper and review-site builder. The scraper captures logged-in course pages with Playwright, then converts the saved Moodle HTML into a clean offline quiz/review website backed by structured JSON.
+Local TEFSuccess scraper and quiz website for **Muhammad Awais Success Web**. The scraper logs into [tefsuccess.ca](https://tefsuccess.ca), captures quiz review pages with Playwright, and builds a static practice site deployed to Vercel.
 
 ## Setup
 
@@ -8,94 +8,53 @@ Local TEFSuccess/Moodle scraper and review-site builder. The scraper captures lo
 npm install
 ```
 
-Python 3.10+ is also required for the command wrappers.
-
 ## Credentials
 
-Do not hardcode credentials. Provide them only through environment variables:
+Never commit credentials. Use environment variables only:
 
 ```powershell
 $env:TEF_USERNAME="your-email@example.com"
 $env:TEF_PASSWORD="your-password"
 ```
 
-## Run A Full Scrape
+## Full refresh (scrape → build → deploy)
 
-```bash
-python scrape.py --config config.json
+Re-scrapes all quizzes (auto-completing attempts when answer keys are missing), refetches reviews, scrapes Expression écrite/orale pages, rebuilds `public/`, and deploys:
+
+```powershell
+npm run refresh:all
 ```
 
-This runs `QuizDeepScraper.js`, updates `scrape_state.json` with the newest export folder, and builds the structured site into `output/`.
+Rebuild and deploy from the latest scrape without re-scraping:
 
-## Resume / Rebuild
-
-Rebuild from the last successful scrape:
-
-```bash
-python scrape.py --resume
+```powershell
+npm run refresh:build
 ```
 
-Build from the configured `sourceExportDir` without scraping:
+## Individual commands
 
-```bash
-python scrape.py --build-only
-```
+| Command | Purpose |
+|---------|---------|
+| `npm start` | Local server at http://localhost:3000 |
+| `npm run scrape:tef` | Scrape only (via `scrape.py`) |
+| `npm run refetch:reviews` | Re-download review pages for mocks missing answer keys |
+| `npm run scrape:production` | Scrape Expression écrite/orale study pages |
+| `npm run rebuild:public` | Rebuild `public/data/course.json` from latest export |
+| `npm run deploy:vercel` | Deploy `public/` to Vercel |
 
-Or build directly:
+## Live site
 
-```bash
-python build_site.py --source downloaded_site/quiz-deep-2026-06-07T13-05-25-044Z --output output
-```
+https://awais-ahmed-success-web.vercel.app
 
-## Open The Local Website
+## What gets scraped
 
-```bash
-python -m http.server 8000 -d output
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8000/
-```
-
-## Output Structure
-
-```text
-output/
-  index.html
-  assets/
-    source/
-  data/
-    course.json
-    sections/
-      comprehension_ecrite.json
-      comprehension_orale.json
-      production_ecrite.json
-      production_orale.json
-  css/
-    style.css
-  js/
-    app.js
-```
-
-## What The Builder Extracts
-
-- Course sections and mocks
-- Question order
-- Question text and cleaned HTML
-- MCQ options
-- User/correct-answer fields when visible in the saved review HTML
-- Scores/grades when visible
-- Local image and audio references
-- Explanations/transcriptions when present in Moodle feedback blocks
-
-The generated frontend removes Moodle boilerplate and provides dashboard, quiz mode, review mode, clickable MCQs, localStorage answer saving, and responsive styling.
+- **Compréhension écrite** — 21 mock quizzes
+- **Compréhension orale** — 20 mock quizzes (audio + images)
+- **Expression écrite / orale** — introduction and section study pages
+- Correct answers from completed Moodle review pages (auto-submits attempts when needed)
 
 ## Checks
 
 ```bash
 npm run check
-node --check scripts/build-tef-site.js
-node --check scripts/tef-app-template.js
 ```

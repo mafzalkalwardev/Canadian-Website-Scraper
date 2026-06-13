@@ -4,6 +4,7 @@ node_modules/
 # Scraper output and browser state
 downloaded_site/
 output/
+public/data/course.local.json
 scrape_state.json
 persistent_profiles/
 browser-profile*/
@@ -35,3 +36,4 @@ __pycache__/
 # OS files
 Thumbs.db
 .DS_Store
+.vercel

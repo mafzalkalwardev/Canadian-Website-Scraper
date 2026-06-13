@@ -1,4 +1,6 @@
 {
+  "name": "awais-ahmed-success-web",
+  "buildCommand": "",
   "outputDirectory": "public",
   "cleanUrls": true,
   "headers": [
