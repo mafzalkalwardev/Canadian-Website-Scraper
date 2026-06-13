@@ -1,5 +1,8 @@
 downloaded_site/
 output/
+public/assets/
+public/data/course.local.json
+public/data/sections/
 node_modules/
 persistent_profiles/
 browser-profile*/

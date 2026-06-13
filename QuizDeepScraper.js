@@ -151,11 +151,35 @@ async function scrapeQuiz(quizUrl, quizIndex) {
   await settle(page);
   await saveCurrentPage(`quiz_${String(quizIndex).padStart(3, '0')}_landing`);
 
-  const reviewUrls = await collectReviewUrls(page);
+  let reviewUrls = await collectReviewUrls(page);
   if (reviewUrls.length) {
-    emit('log', `Found ${reviewUrls.length} review attempt(s); scraping latest review.`);
-    await scrapeReview(reviewUrls[0], quizIndex);
-    return;
+    const bestScore = await bestReviewScore(reviewUrls);
+    if (bestScore < 30) {
+      emit('log', `Best review only has ${bestScore} answer(s); auto-completing a quiz attempt for answer keys.`);
+      if (await autoCompleteQuizAttempt(page, quizUrl)) {
+        await page.goto(quizUrl, { waitUntil: 'domcontentloaded', timeout: 0 });
+        await settle(page);
+        reviewUrls = await collectReviewUrls(page);
+      }
+    }
+    if (reviewUrls.length) {
+      emit('log', `Found ${reviewUrls.length} review attempt(s); choosing the best completed review.`);
+      await scrapeBestReview(reviewUrls, quizIndex);
+      return;
+    }
+  }
+
+  if (!reviewUrls.length) {
+    emit('log', 'No review attempts found; trying to complete a quiz attempt for answer keys.');
+    if (await autoCompleteQuizAttempt(page, quizUrl)) {
+      await page.goto(quizUrl, { waitUntil: 'domcontentloaded', timeout: 0 });
+      await settle(page);
+      reviewUrls = await collectReviewUrls(page);
+      if (reviewUrls.length) {
+        await scrapeBestReview(reviewUrls, quizIndex);
+        return;
+      }
+    }
   }
 
   const entered = await enterQuizAttempt(page);
@@ -227,6 +251,151 @@ async function collectReviewUrls(targetPage) {
   const script = $('script').map((i, el) => $(el).html() || '').get().join('\n').replace(/\\\//g, '/').replace(/&amp;/g, '&');
   for (const match of script.matchAll(/https:\/\/tefsuccess\.ca\/mod\/quiz\/review\.php\?attempt=\d+&cmid=\d+/gi)) urls.push(match[0]);
   return Array.from(new Set(urls));
+}
+
+async function countReviewAnswersOnPage(targetPage) {
+  const html = await targetPage.content();
+  const $ = cheerio.load(html);
+  let count = 0;
+  $('.que').each((_, element) => {
+    const question = $(element);
+    if (question.find('.rightanswer').text().trim()) count += 1;
+    else if (question.find('.answer .correct').length) count += 1;
+  });
+  return count;
+}
+
+async function scoreReviewAttempt(reviewUrl) {
+  let current = reviewUrl;
+  const seen = new Set();
+  let total = 0;
+
+  for (let i = 0; i < MAX_PAGES_PER_QUIZ; i += 1) {
+    const key = normalizeUrl(current);
+    if (seen.has(key)) break;
+    seen.add(key);
+
+    await page.goto(current, { waitUntil: 'domcontentloaded', timeout: 0 });
+    await settle(page);
+    total += await countReviewAnswersOnPage(page);
+
+    const next = await nextReviewUrl(page);
+    if (!next || normalizeUrl(next) === key) break;
+    current = next;
+  }
+
+  return total;
+}
+
+async function bestReviewScore(reviewUrls) {
+  let best = -1;
+  for (const reviewUrl of reviewUrls) {
+    const score = await scoreReviewAttempt(reviewUrl);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
+async function answerVisibleQuestions(targetPage) {
+  await targetPage.evaluate(() => {
+    document.querySelectorAll('.que').forEach((question) => {
+      const radios = Array.from(question.querySelectorAll('.answer input[type="radio"]:not(:disabled)'));
+      if (!radios.length) return;
+      const checked = radios.find((radio) => radio.checked);
+      if (!checked) radios[0].click();
+    });
+  }).catch(() => {});
+}
+
+async function submitQuizSummary(targetPage) {
+  const finishSelectors = [
+    'input[type="submit"][name="finishattempt"]',
+    'input[type="submit"][value*="Submit all"]',
+    'input[type="submit"][value*="Finish attempt"]',
+    'button:has-text("Submit all")',
+    'button:has-text("Finish attempt")',
+  ];
+
+  for (const selector of finishSelectors) {
+    const locator = targetPage.locator(selector).first();
+    if (!(await locator.count().catch(() => 0))) continue;
+    emit('log', `Submitting quiz summary via ${selector}`);
+    await Promise.all([
+      targetPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {}),
+      locator.click({ timeout: 10000 }).catch(async () => locator.evaluate((el) => el.click())),
+    ]);
+    await targetPage.waitForTimeout(1500);
+    await confirmQuizSubmitIfPresent(targetPage);
+    await targetPage.waitForTimeout(2000);
+    return /review\.php|view\.php/i.test(targetPage.url());
+  }
+  return false;
+}
+
+async function confirmQuizSubmitIfPresent(targetPage) {
+  const confirmSelectors = [
+    'input[type="submit"][value*="Submit all and finish"]',
+    'input[type="submit"][value*="Submit"]',
+    'button:has-text("Submit all and finish")',
+    '.modal-dialog input[type="submit"]',
+  ];
+  for (const selector of confirmSelectors) {
+    const locator = targetPage.locator(selector).first();
+    if (!(await locator.count().catch(() => 0))) continue;
+    await locator.click({ timeout: 5000 }).catch(async () => locator.evaluate((el) => el.click()));
+    await targetPage.waitForTimeout(1500);
+    return;
+  }
+}
+
+async function autoCompleteQuizAttempt(targetPage, quizUrl) {
+  await targetPage.goto(quizUrl, { waitUntil: 'domcontentloaded', timeout: 0 });
+  await settle(targetPage);
+  if (!(await enterQuizAttempt(targetPage))) {
+    emit('log', `Could not enter quiz attempt for ${quizUrl}`);
+    return false;
+  }
+
+  for (let step = 0; step < MAX_PAGES_PER_QUIZ; step += 1) {
+    const currentUrl = targetPage.url();
+    if (/review\.php/i.test(currentUrl)) return true;
+
+    if (/summary\.php/i.test(currentUrl)) {
+      await answerVisibleQuestions(targetPage);
+      return submitQuizSummary(targetPage);
+    }
+
+    await answerVisibleQuestions(targetPage);
+    const moved = await clickNextQuestion(targetPage);
+    await targetPage.waitForTimeout(800);
+
+    if (!moved && /summary\.php/i.test(targetPage.url())) {
+      await answerVisibleQuestions(targetPage);
+      return submitQuizSummary(targetPage);
+    }
+
+    if (!moved && /review\.php/i.test(targetPage.url())) return true;
+    if (!moved) {
+      emit('log', `Auto-complete stopped at ${targetPage.url()}`);
+      return /review\.php/i.test(targetPage.url());
+    }
+  }
+
+  emit('error', `Auto-complete page limit reached for ${quizUrl}`);
+  return /review\.php|view\.php/i.test(targetPage.url());
+}
+
+async function scrapeBestReview(reviewUrls, quizIndex) {
+  let best = { url: reviewUrls[0], score: -1 };
+
+  for (const reviewUrl of reviewUrls) {
+    const score = await scoreReviewAttempt(reviewUrl);
+    emit('log', `Review attempt scored ${score} graded answer(s): ${reviewUrl}`);
+    if (score > best.score) best = { url: reviewUrl, score };
+  }
+
+  emit('log', `Saving review with ${best.score} graded answer(s): ${best.url}`);
+  await scrapeReview(best.url, quizIndex);
 }
 
 async function scrapeReview(reviewUrl, quizIndex) {
@@ -435,7 +604,7 @@ function extractAttemptUrl(html, baseUrl) {
 }
 
 async function clickNextQuestion(targetPage) {
-  const unsafeText = /submit all|finish attempt|submit and finish/i;
+  const unsafeText = /submit all and finish|submit and finish/i;
   const candidates = [
     'input[type="submit"][name="next"]',
     'input[type="submit"][value*="Next"]',
@@ -446,8 +615,9 @@ async function clickNextQuestion(targetPage) {
   for (const selector of candidates) {
     const locator = targetPage.locator(selector).first();
     if (!(await locator.count().catch(() => 0))) continue;
+    const name = await locator.getAttribute('name').catch(() => '');
     const label = await locator.evaluate((el) => `${el.value || ''} ${el.textContent || ''} ${el.getAttribute('aria-label') || ''}`).catch(() => '');
-    if (unsafeText.test(label)) continue;
+    if (name !== 'next' && unsafeText.test(label)) continue;
     emit('log', `Next question: ${label.trim() || selector}`);
     const before = targetPage.url();
     await Promise.all([
@@ -455,7 +625,7 @@ async function clickNextQuestion(targetPage) {
       locator.click({ timeout: 10000 }).catch(async () => locator.evaluate((el) => el.click())),
     ]);
     await targetPage.waitForTimeout(1500);
-    return targetPage.url() !== before || true;
+    return targetPage.url() !== before || /summary\.php|review\.php/i.test(targetPage.url());
   }
   return false;
 }
