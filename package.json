@@ -1,5 +1,5 @@
 {
-  "name": "canadian-website-scraper",
+  "name": "@mafzalkalwardev/Canadian-Website-Scraper",
   "version": "1.0.0",
   "description": "Local website scraper with web, desktop, and command-line controls for offline HTML exports.",
   "main": "Scraper.js",
@@ -41,5 +41,12 @@
     "express": "^4.18.2",
     "fs-extra": "^11.3.5",
     "playwright": "^1.59.1"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mafzalkalwardev/Canadian-Website-Scraper.git"
   }
 }
