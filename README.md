@@ -94,3 +94,8 @@ https://awais-ahmed-success-web.vercel.app
 ```bash
 npm run check
 ```
+
+## Screenshots
+
+![Canadian-Website-Scraper dashboard](docs/screenshots/app.png)
+
