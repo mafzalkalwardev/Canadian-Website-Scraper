@@ -98,4 +98,3 @@ npm run check
 ## Screenshots
 
 ![Canadian-Website-Scraper dashboard](docs/screenshots/app.png)
-
