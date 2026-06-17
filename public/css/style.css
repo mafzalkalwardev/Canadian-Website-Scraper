@@ -40,7 +40,7 @@ img { max-width: 100%; height: auto; display: block; }
   display: grid;
   place-items: center;
   padding: 20px;
-  background: linear-gradient(135deg, rgba(0,35,149,.92), rgba(30,64,175,.88)), url('logo.png') center/cover no-repeat;
+  background: linear-gradient(135deg, rgba(0,35,149,.92), rgba(30,64,175,.88)), url('../logo.png') center/cover no-repeat;
 }
 
 .profile-gate[hidden] { display: none; }

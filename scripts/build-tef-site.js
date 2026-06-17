@@ -202,13 +202,21 @@ function mergeAnswerKeys(mock) {
   const byNumber = new Map();
   for (const attempt of mock.attempts) {
     for (const question of attempt.questions) {
-      if (question.correctAnswer) byNumber.set(question.number, question.correctAnswer);
+      const answers = Array.isArray(question.correctAnswers) && question.correctAnswers.length
+        ? question.correctAnswers
+        : question.correctAnswer
+          ? [question.correctAnswer]
+          : [];
+      if (answers.length) byNumber.set(question.number, answers);
     }
   }
   for (const attempt of mock.attempts) {
     for (const question of attempt.questions) {
       const merged = byNumber.get(question.number);
-      if (merged) question.correctAnswer = merged;
+      if (merged) {
+        question.correctAnswers = merged;
+        question.correctAnswer = merged[0] || '';
+      }
     }
   }
 }
@@ -225,6 +233,7 @@ function extractQuestions(html, page, meta) {
     const questionHtml = cleanFragment($, qtext);
     const questionText = normalizeText(cheerio.load(questionHtml).text());
     const options = [];
+    const allowsMultiple = question.find('.answer input[type="checkbox"]').length > 0;
 
     question.find('.answer > div').each((optionIndex, optionEl) => {
       const option = $(optionEl);
@@ -247,10 +256,14 @@ function extractQuestions(html, page, meta) {
       });
     });
 
-    const rightAnswer = normalizeText(question.find('.rightanswer').first().text().replace(/^The correct answer is:?\s*/i, ''));
+    const rightAnswer = cleanRightAnswerText(question.find('.rightanswer').first().text());
     const selected = options.find((option) => option.selected);
+    const selectedOptions = options.filter((option) => option.selected).map((option) => option.label);
     const correctOption = options.find((option) => option.correct)
       || options.find((option) => rightAnswer && option.text.includes(rightAnswer));
+    const correctAnswers = options.filter((option) => option.correct).map((option) => option.label);
+    if (!correctAnswers.length) correctAnswers.push(...answerLabelsFromText(options, rightAnswer));
+    const correctAnswer = correctOption ? correctOption.label : correctAnswers[0] || '';
     const images = collectMedia($, question, 'img', 'src');
     const audioSources = collectMedia($, question, 'audio source, audio', 'src');
     const explanation = normalizeText(question.find('.generalfeedback, .specificfeedback, .feedback').text());
@@ -258,15 +271,16 @@ function extractQuestions(html, page, meta) {
 
     questions.push({
       number,
-      type: 'mcq',
+      type: allowsMultiple ? 'multi' : 'mcq',
       questionText,
       questionHtml,
       images,
       audio: audioSources[0] || '',
       audioSources,
       options,
-      userAnswer: selected ? selected.label : '',
-      correctAnswer: correctOption ? correctOption.label : answerLabelFromText(options, rightAnswer),
+      userAnswer: allowsMultiple ? selectedOptions.join(',') : selected ? selected.label : '',
+      correctAnswer,
+      correctAnswers,
       isCorrect: statusText.includes('correct') && !statusText.includes('incorrect'),
       status: state,
       marks: grade,
@@ -386,11 +400,39 @@ function extractTranscription(question) {
 }
 
 function answerLabelFromText(options, answerText) {
-  if (!answerText) return '';
-  const match = String(answerText).match(/^([a-d])\b/i);
-  if (match) return match[1].toUpperCase();
-  const found = options.find((option) => option.text.includes(answerText));
-  return found ? found.label : '';
+  const labels = answerLabelsFromText(options, answerText);
+  return labels[0] || '';
+}
+
+function answerLabelsFromText(options, answerText) {
+  if (!answerText) return [];
+  const letterMatches = Array.from(String(answerText).matchAll(/\b([a-d])(?:\b|\.|\))/gi)).map((match) => match[1].toUpperCase());
+  if (letterMatches.length) return Array.from(new Set(letterMatches));
+  const normalizedAnswer = normalizeAnswerComparable(answerText);
+  const found = options.filter((option) => {
+    const normalizedOption = normalizeAnswerComparable(option.text);
+    return normalizedOption && (
+      normalizedAnswer.includes(normalizedOption)
+      || normalizedOption.includes(normalizedAnswer)
+    );
+  });
+  return found.map((option) => option.label);
+}
+
+function cleanRightAnswerText(value) {
+  return normalizeText(value)
+    .replace(/^The correct answers? (?:is|are):?\s*/i, '')
+    .replace(/^Correct answers?:?\s*/i, '')
+    .trim();
+}
+
+function normalizeAnswerComparable(value) {
+  return normalizeText(value)
+    .replace(/^[a-d]\.\s*/i, '')
+    .replace(/[’']/g, "'")
+    .replace(/[.,;:!?()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
 }
 
 function pageMeta(page) {

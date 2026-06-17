@@ -247,8 +247,11 @@ function renderNav() {
       ? section.mocks.map((mock) => {
         const questionCount = mock.attempts.reduce((count, attempt) => count + attempt.questions.length, 0);
         const result = results[resultKey(section, mock)];
+        const answerStats = mockAnswerKeyStats(mock);
         const scoreBadge = result
           ? `<span class="mock-btn-score">${esc(result.grade)}</span>`
+          : answerStats.total && answerStats.graded < answerStats.total
+            ? `<span class="mock-btn-score pending">${answerStats.graded ? `${answerStats.graded}/${answerStats.total}` : 'Key missing'}</span>`
           : '';
         return `<button class="mock-btn" data-section="${section.id}" data-mock="${mock.id}">
           <span class="mock-btn-icon">📝</span>
@@ -418,10 +421,20 @@ function getReviewQuestions(mock) {
 }
 
 function getCorrectAnswer(mock, questionNumber) {
+  const answers = getCorrectAnswers(mock, questionNumber);
+  return answers[0] || '';
+}
+
+function getCorrectAnswers(mock, questionNumber) {
   const reviewMap = new Map(getReviewQuestions(mock).map((question) => [question.number, question.correctAnswer]));
+  const reviewMultiMap = new Map(getReviewQuestions(mock).map((question) => [question.number, question.correctAnswers]));
   const active = attemptsForMode(mock).flatMap((attempt) => attempt.questions);
   const question = active.find((item) => item.number === questionNumber);
-  return (question && question.correctAnswer) || reviewMap.get(questionNumber) || '';
+  if (question && Array.isArray(question.correctAnswers) && question.correctAnswers.length) return question.correctAnswers;
+  const reviewAnswers = reviewMultiMap.get(questionNumber);
+  if (Array.isArray(reviewAnswers) && reviewAnswers.length) return reviewAnswers;
+  const single = (question && question.correctAnswer) || reviewMap.get(questionNumber) || '';
+  return single ? [single] : [];
 }
 
 function getDisplayQuestions(mock) {
@@ -432,6 +445,21 @@ function getDisplayQuestions(mock) {
   return attemptsForMode(mock).flatMap((attempt) => attempt.questions);
 }
 
+function mockAnswerKeyStats(mock) {
+  const withQuestions = mock.attempts.filter((attempt) => attempt.questions.length);
+  const reviews = withQuestions.filter((attempt) => attempt.mode === 'review');
+  const practice = withQuestions.filter((attempt) => attempt.mode !== 'review');
+  const displayAttempts = reviews.length ? reviews : practice.length ? practice : withQuestions;
+  const questions = displayAttempts.flatMap((attempt) => attempt.questions);
+  const graded = questions.filter((question) => correctAnswersFor(question, mock).length).length;
+  return {
+    total: questions.length,
+    graded,
+    ungraded: questions.length - graded,
+    fullyGraded: questions.length > 0 && graded === questions.length,
+  };
+}
+
 function scoreMock(mock) {
   const questions = getDisplayQuestions(mock);
   let correct = 0;
@@ -439,12 +467,12 @@ function scoreMock(mock) {
   let answered = 0;
 
   questions.forEach((question) => {
-    const userAnswer = localStorage.getItem(answerKey(question)) || '';
-    if (userAnswer) answered += 1;
-    const correctAnswer = question.correctAnswer || getCorrectAnswer(mock, question.number);
-    if (!correctAnswer) return;
+    const userAnswers = savedAnswers(question);
+    if (userAnswers.length) answered += 1;
+    const correctAnswers = correctAnswersFor(question, mock);
+    if (!correctAnswers.length) return;
     graded += 1;
-    if (userAnswer === correctAnswer) correct += 1;
+    if (sameAnswers(userAnswers, correctAnswers)) correct += 1;
   });
 
   const wrong = graded - correct;
@@ -460,7 +488,7 @@ function scoreMock(mock) {
     answered,
     ungraded: questions.length - graded,
     pct,
-    grade: `${pct}%`,
+    grade: graded ? `${pct}%` : 'Ungraded',
   };
 }
 
@@ -474,9 +502,16 @@ function submitCurrentQuiz() {
   }
 
   const unanswered = score.total - score.answered;
-  const confirmMsg = unanswered > 0
-    ? `You have ${unanswered} unanswered question(s). Submit anyway and view your results?`
-    : 'Submit your quiz? You will see your score and correct answers in review mode.';
+  let confirmMsg = 'Submit your quiz? You will see your score and correct answers in review mode.';
+  if (score.graded === 0) {
+    confirmMsg = unanswered > 0
+      ? `You have ${unanswered} unanswered question(s). This mock also does not have an answer key yet, so it will be saved as ungraded. Submit anyway?`
+      : 'This mock does not have an answer key yet, so it will be saved as ungraded. Submit anyway?';
+  } else if (unanswered > 0) {
+    confirmMsg = `You have ${unanswered} unanswered question(s). Submit anyway and view your results?`;
+  } else if (score.ungraded > 0) {
+    confirmMsg = `${score.ungraded} question(s) do not have official answers yet. Submit and grade the available ${score.graded} question(s)?`;
+  }
   if (!confirm(confirmMsg)) return;
 
   const results = getResults();
@@ -552,6 +587,7 @@ function renderMock(mock) {
   const result = getMockResult(currentSection, mock);
   const reveal = mode === 'review' || showResults || submitted;
   const displayQuestions = getDisplayQuestions(mock);
+  const answerStats = mockAnswerKeyStats(mock);
 
   updateQuizProgress(mock, displayQuestions);
 
@@ -569,6 +605,13 @@ function renderMock(mock) {
       ? `<section class="panel review-banner"><h2>Review Mode</h2><p style="margin:0;color:var(--muted)">Compare your saved answers with the correct ones below.</p></section>`
       : `<section class="panel"><h2>Quiz</h2><p style="margin:0;color:var(--muted)">Select your answers for all questions, then click <strong>Submit Quiz</strong>.</p></section>`;
 
+  const answerKeyBanner = answerStats.total && answerStats.graded < answerStats.total
+    ? `<section class="panel review-banner answer-key-warning">
+        <h2>Answer Key Incomplete</h2>
+        <p style="margin:0;color:var(--muted)">${answerStats.graded ? `${answerStats.graded} of ${answerStats.total}` : 'No'} official answer${answerStats.graded === 1 ? '' : 's'} available for this mock. ${answerStats.graded ? 'Only available answers will be graded.' : 'Submissions are saved for review, but no score is calculated yet.'}</p>
+      </section>`
+    : '';
+
   content.innerHTML = `
     <div class="panel mock-header">
       <div>
@@ -581,6 +624,7 @@ function renderMock(mock) {
       </div>
     </div>
     ${headerExtra}
+    ${answerKeyBanner}
     ${reviewBanner}
     ${displayQuestions.map((question) => renderQuestion(question, mock, reveal)).join('')}`;
 
@@ -596,9 +640,24 @@ function renderMock(mock) {
 function renderQuizResultCard(result) {
   const wrong = result.wrong ?? Math.max(0, result.graded - result.correct);
   const skipped = result.skipped ?? Math.max(0, result.total - result.answered);
+  if (result.graded === 0) {
+    return `<div class="result-card quiz-result" id="quizResultCard">
+      <p class="eyebrow" style="margin-bottom:6px">Quiz Submitted</p>
+      <div class="result-grade">Ungraded</div>
+      <p class="result-verdict">This mock is saved, but the official answer key is not available yet.</p>
+      <div class="result-stats">
+        <div class="result-stat"><strong>${result.answered}</strong><span>Answered</span></div>
+        <div class="result-stat"><strong>${skipped}</strong><span>Skipped</span></div>
+        <div class="result-stat"><strong>${result.total}</strong><span>Total</span></div>
+      </div>
+      <p class="result-summary-line">No official answers are available for this mock yet, so this submission is saved without a calculated grade.</p>
+    </div>`;
+  }
   const correctPct = result.graded ? Math.round((result.correct / result.graded) * 100) : 0;
   const wrongPct = result.graded ? Math.round((wrong / result.graded) * 100) : 0;
-  const verdict = result.pct >= 70
+  const verdict = result.graded === 0
+    ? 'This mock is saved, but the official answer key is not available yet.'
+    : result.pct >= 70
     ? 'Excellent work! Review any mistakes below.'
     : result.pct >= 50
       ? 'Good effort — check the questions you missed below.'
@@ -606,7 +665,7 @@ function renderQuizResultCard(result) {
 
   return `<div class="result-card quiz-result" id="quizResultCard">
     <p class="eyebrow" style="margin-bottom:6px">Quiz Submitted — Now in Review Mode</p>
-    <div class="result-grade">${esc(result.grade)}</div>
+    <div class="result-grade">${esc(result.graded ? result.grade : 'Ungraded')}</div>
     <p class="result-verdict">${verdict}</p>
     <div class="score-breakdown">
       <div class="score-bar">
@@ -662,20 +721,25 @@ function updateSubmitBar() {
   const show = mode === 'quiz' && currentMock && !showResults && !isMockSubmitted();
   submitBar.hidden = !show;
   if (show && submitHint) {
-    submitHint.textContent = 'Answer all questions, then submit to see your grade.';
+    const stats = mockAnswerKeyStats(currentMock);
+    submitHint.textContent = stats.total && stats.graded < stats.total
+      ? stats.graded
+        ? `Answer all questions, then submit to grade ${stats.graded} of ${stats.total} questions with available answer keys.`
+        : 'Answer all questions, then submit to save your responses. This mock has no answer key yet.'
+      : 'Answer all questions, then submit to see your grade.';
   }
 }
 
 function renderQuestion(question, mock, reveal) {
   const key = answerKey(question);
-  const saved = savedAnswer(question);
-  const correctAnswer = question.correctAnswer || getCorrectAnswer(mock, question.number);
+  const saved = savedAnswers(question);
+  const correctAnswers = correctAnswersFor(question, mock);
   let status = '';
 
-  if (reveal && correctAnswer) {
-    if (!saved) status = 'unanswered';
-    else status = saved === correctAnswer ? 'correct' : 'wrong';
-  } else if (reveal && !correctAnswer && saved) {
+  if (reveal && correctAnswers.length) {
+    if (!saved.length) status = 'unanswered';
+    else status = sameAnswers(saved, correctAnswers) ? 'correct' : 'wrong';
+  } else if (reveal && !correctAnswers.length && saved.length) {
     status = '';
   }
 
@@ -694,16 +758,17 @@ function renderQuestion(question, mock, reveal) {
     </div>
     <div class="qtext">${fixAssetHtml(question.questionHtml || esc(question.questionText))}</div>
     ${media(question)}
-    <div class="options">${question.options.map((option) => optionHtml(option, question, key, saved, reveal, correctAnswer)).join('')}</div>
-    ${reviewBlock(question, saved, reveal, correctAnswer)}
+    <div class="options">${question.options.map((option) => optionHtml(option, question, key, saved, reveal, correctAnswers)).join('')}</div>
+    ${reviewBlock(question, saved, reveal, correctAnswers)}
   </article>`;
 }
 
-function optionHtml(option, question, key, saved, reveal, correctAnswer) {
-  const selected = saved === option.label;
-  const isCorrectOption = reveal && correctAnswer === option.label;
-  const isWrongChoice = reveal && selected && correctAnswer && saved !== correctAnswer;
+function optionHtml(option, question, key, saved, reveal, correctAnswers) {
+  const selected = saved.includes(option.label);
+  const isCorrectOption = reveal && correctAnswers.includes(option.label);
+  const isWrongChoice = reveal && selected && correctAnswers.length && !correctAnswers.includes(option.label);
   const locked = reveal && (isMockSubmitted() || mode === 'review');
+  const inputType = isMultiQuestion(question) ? 'checkbox' : 'radio';
 
   const classes = [
     'option',
@@ -715,7 +780,7 @@ function optionHtml(option, question, key, saved, reveal, correctAnswer) {
   ].filter(Boolean).join(' ');
 
   return `<label class="${classes}">
-    <input type="radio" name="${key}" value="${option.label}" ${selected ? 'checked' : ''} data-key="${key}"${locked ? ' disabled' : ''}>
+    <input type="${inputType}" name="${key}" value="${option.label}" ${selected ? 'checked' : ''} data-key="${key}"${locked ? ' disabled' : ''}>
     <strong>${esc(option.label)}.</strong>
     <span>${fixAssetHtml(option.html || esc(option.text))}</span>
     ${reveal && isCorrectOption ? '<span style="margin-left:auto;font-size:11px;font-weight:800;color:var(--green)">Correct</span>' : ''}
@@ -754,33 +819,34 @@ function wireMedia() {
   });
 }
 
-function reviewBlock(question, saved, reveal, correctAnswer) {
+function reviewBlock(question, saved, reveal, correctAnswers) {
   if (!reveal) return '';
 
-  if (!correctAnswer) {
-    return saved
-      ? `<div class="explain"><p><strong>Your answer:</strong> ${esc(saved)}</p><p><em>Official correct answer not available for auto-grading.</em></p></div>`
+  if (!correctAnswers.length) {
+    return saved.length
+      ? `<div class="explain"><p><strong>Your answer:</strong> ${esc(saved.join(', '))}</p><p><em>Official correct answer not available for auto-grading.</em></p></div>`
       : '';
   }
 
-  const isCorrect = saved === correctAnswer;
+  const isCorrect = sameAnswers(saved, correctAnswers);
+  const savedText = saved.join(', ');
+  const correctText = correctAnswers.join(', ');
   let verdict = '';
 
   if (isCorrect) {
-    verdict = `<p class="answer-verdict correct">✓ Correct! You chose <strong>${esc(saved)}</strong>.</p>`;
-  } else if (saved) {
-    verdict = `<p class="answer-verdict wrong">✗ Incorrect. You chose <strong>${esc(saved)}</strong> — the correct answer is <strong>${esc(correctAnswer)}</strong>.</p>`;
+    verdict = `<p class="answer-verdict correct">Correct! You chose <strong>${esc(savedText)}</strong>.</p>`;
+  } else if (saved.length) {
+    verdict = `<p class="answer-verdict wrong">Incorrect. You chose <strong>${esc(savedText)}</strong> - the correct answer is <strong>${esc(correctText)}</strong>.</p>`;
   } else {
-    verdict = `<p class="answer-verdict skipped">○ You did not answer this question. The correct answer is <strong>${esc(correctAnswer)}</strong>.</p>`;
+    verdict = `<p class="answer-verdict skipped">You did not answer this question. The correct answer is <strong>${esc(correctText)}</strong>.</p>`;
   }
 
-  return `<div class="explain ${isCorrect ? 'explain-correct' : saved ? 'explain-wrong' : ''}">
+  return `<div class="explain ${isCorrect ? 'explain-correct' : saved.length ? 'explain-wrong' : ''}">
     ${verdict}
     ${question.explanation ? `<p><strong>Explanation:</strong> ${esc(question.explanation)}</p>` : ''}
     ${question.transcription ? `<p><strong>Transcription:</strong> ${esc(question.transcription)}</p>` : ''}
   </div>`;
 }
-
 function attemptsForMode(mock) {
   const withQuestions = mock.attempts.filter((attempt) => attempt.questions.length);
   if (mode === 'review') {
@@ -796,14 +862,49 @@ function answerKey(question) {
 }
 
 function savedAnswer(question) {
-  return localStorage.getItem(answerKey(question)) || '';
+  return savedAnswers(question)[0] || '';
+}
+
+function savedAnswers(question) {
+  const raw = localStorage.getItem(answerKey(question)) || '';
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter(Boolean);
+  } catch (err) {
+    // Older saved radio answers are plain strings.
+  }
+  return raw.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function correctAnswersFor(question, mock) {
+  if (Array.isArray(question.correctAnswers) && question.correctAnswers.length) return question.correctAnswers;
+  if (question.correctAnswer) return [question.correctAnswer];
+  return getCorrectAnswers(mock, question.number);
+}
+
+function isMultiQuestion(question) {
+  return question.type === 'multi' || (Array.isArray(question.correctAnswers) && question.correctAnswers.length > 1);
+}
+
+function sameAnswers(left, right) {
+  if (left.length !== right.length) return false;
+  const a = [...left].sort().join('|');
+  const b = [...right].sort().join('|');
+  return a === b;
 }
 
 function wireOptions(lock) {
-  document.querySelectorAll('input[type=radio][data-key]').forEach((input) => {
+  document.querySelectorAll('input[data-key]').forEach((input) => {
     if (lock) return;
     input.onchange = () => {
-      localStorage.setItem(input.dataset.key, input.value);
+      if (input.type === 'checkbox') {
+        const checked = Array.from(document.querySelectorAll(`input[type="checkbox"][data-key="${input.dataset.key}"]:checked`))
+          .map((item) => item.value);
+        localStorage.setItem(input.dataset.key, JSON.stringify(checked));
+      } else {
+        localStorage.setItem(input.dataset.key, input.value);
+      }
       const scroller = document.querySelector('.content');
       const prevScrollTop = scroller ? scroller.scrollTop : null;
       if (currentMock) {
