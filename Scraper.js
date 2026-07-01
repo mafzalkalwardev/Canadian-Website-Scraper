@@ -1,3 +1,4 @@
+const { requireIndusLicense } = require('./lib/indus_license');
 const { chromium } = require('playwright');
 const fs = require('fs-extra');
 const path = require('path');
@@ -26,6 +27,7 @@ main().catch(async (err) => {
   await shutdown(1);
 });
 
+  await requireIndusLicense(__dirname);
 async function main() {
   if (!isHttpUrl(startUrl)) throw new Error('A valid http or https URL is required.');
 
